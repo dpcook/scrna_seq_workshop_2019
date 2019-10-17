@@ -1,0 +1,149 @@
+---
+title: "scRNA-Seq Tutorial Part 2: Exploration and Downstream Analysis"
+output:
+  github_document:
+    toc: true
+---
+
+# Dependencies
+```{r}
+library(Seurat)
+library(dplyr)
+library(viridis)
+```
+
+# Load the data
+```{r}
+pbmc <- readRDS("../data/pbmc_processed.rds")
+```
+
+# Exploring the data!
+It's never a good idea to autopilot through an analysis. Try to look at your data in different ways
+
+The safest approach is to assume that every pattern you see is technical. 
+Do the work to prove to yourself that what you're looking at is biological
+
+# Clustering
+Default clustering in Seurat involves building a nearest neighbour graph and then doing louvain clustering 
+
+The nearest neighbour graph is built from principal components, not gene expression directly
+We need to determine how many components to use to build the graph.
+
+To do this, the inelegant way is to assess the standard deviation of each PC and
+see how many PCs it takes until it plateaus
+
+```{r}
+ElbowPlot(pbmc, ndims=50)
+```
+
+30 seems like a good cutoff here. Many datasets have similar cutoffs
+
+```{r}
+pbmc <- FindNeighbors(pbmc, dims = 1:30) #dims corresponds to principal components--we cluster in the top 30 PCs
+pbmc <- FindClusters(pbmc, resolution = 0.25) #resolution corresponds to the granularity--ie. do you want many or few clusters?
+```
+
+# Dimensionality reduction
+
+## PCA 
+We already ran the PCA, but lets look into it a bit deeper
+
+Note: For visualization, we'll use the DimPlot and FeaturePlot functions a lot.
+DimPlot is for categorical labelling of cells (eg. cluster ID, cell cycle stage, sample ID)
+FeaturePlot is for numerical labelling (eg. a gene's expression, number of UMIs detected, etc)
+
+In these plots you can label the cells with any gene's expression that's in the data set, or
+anything included as a column in your metadata table
+```{r}
+colnames(pbmc@meta.data)
+```
+
+
+```{r}
+DimPlot(pbmc, reduction="pca") # Default is to show clusters
+DimPlot(pbmc, group.by="Phase") # Phase is
+```
+
+How about some more technical factors? 
+```{r}
+FeaturePlot(pbmc, features=c("nCount_RNA", "nFeature_RNA", "percent.mito"))
+```
+ 
+We can begin to look at genes' expression too, but some of the clusters are overlapping in the PCA plot.
+We will need different techniques to visualize the complexity of the data
+
+```{r}
+FeaturePlot(pbmc, features=c("CD3D", "CD14", "CD79A")) #T cell, Myeloid, and B cell markers
+```
+
+We can see separation of major cell types in the PCA plot, but we may be missing out on cell type sub-structure or rare cell types
+
+# UMAP
+UMAP is an example of non-linear dimensionality reduction. This allows it to capture complex structure in as few as two dimensions
+*Though* a consequence of non-linear techniques is that the axes themselves become much less meaningful and hard to interpret.
+eg. Cells further along an axis do not necessarily have more or less expression of specific genes, unlike PCA
+
+```{r}
+pbmc <- RunUMAP(pbmc, dims = 1:30) # again, this is performed on PC embeddings
+```
+
+```{r}
+DimPlot(pbmc, label=T)
+```
+
+With the UMAP embedding, the clusters are much better separated!
+This is the point where I'll usually look at the structure of the data and determine if my clustering resolution was good
+If I see "shape" to the clusters that look like they could be distinct cell types/states, I may increase the clustering resolution
+
+
+At this point, we can start trying to identify genes based on known markers
+Eg. CD3 = T cells, CD79A = B cells, CD14 = Myeloid cells
+
+```{r}
+FeaturePlot(pbmc, features=c("CD3D", "CD79A", "CD14"))
+```
+
+Or, we can do a more unbiased approach and use differential expression to tell us the top markers of each cluster
+
+# Identifying new markers
+With scRNA-Seq, we're often trying to find marker genes that define each of our populations/clusters. 
+
+We can do this a cluster at a time with the FindMarkers function, or we can find markers for all clusters in one run using FindAllMarkers. This function offers 9 different tests that can be used. The current default is the Wilcoxon rank sum test. A recent paper benchmarked a large amount of differential expression tests, which you can check out [here](LINK PAPER). Wilcoxon test ranked quite highly in their list.
+
+The only.pos option, when TRUE, will only return positive markers of each cluster. Min.pct sets what percentage of cells the gene must be detected in. logfc.threshold a log2 fold-change requirement to be considered a marker (to speed up the run, we'll set this to 0.5)
+
+https://tinyurl.com/single-cell-2018
+
+```{r}
+#This may take a bit
+pbmc.markers <- FindAllMarkers(pbmc, only.pos = TRUE, min.pct = 0.2, 
+                               logfc.threshold = 0.5)
+```
+
+```{r}
+pbmc.markers %>% group_by(cluster) %>% top_n(10, avg_logFC)
+```
+
+Let's just make a smaller data frame with the top markers (by logFC) of each group.
+
+```{r}
+top_markers <- pbmc.markers %>% group_by(cluster) %>% top_n(1, avg_logFC)
+```
+
+If you look at the fold changes for all the markers, you'll see that we found some pretty strong markers for most populations. Cluster 1 and 3  don't seem to have genes that are a *lot* higher, but it's still pretty good.
+
+Let's visualize the top marker expression across the cells
+
+```{r}
+#This may not be visible if you print it out in the notebook. You can copy the code into your console and stretch the
+#plot window to full screen to see it
+FeaturePlot(pbmc, features = top_markers$gene, pt.size=0.25)
+```
+
+Heatmaps are also a good way at looking at the stratification of expression patterns across cells. 
+Let's make one, showing the top 10 markers of each cluster
+
+```{r}
+top_markers <- pbmc.markers %>% group_by(cluster) %>% top_n(10, avg_logFC)
+DoHeatmap(pbmc, features = top_markers$gene) + NoLegend()
+```

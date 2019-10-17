@@ -1,0 +1,104 @@
+---
+title: "scRNA-seq Workshop"
+output: html_notebook
+---
+
+# Dependencies
+```{r}
+library(Seurat)
+library(dplyr)
+library(viridis)
+```
+
+# Load the data
+```{r}
+pbmc.data <- Read10X(data.dir = "../data/filtered_gene_bc_matrices_8kpbmc/GRCh38/")
+head(rownames(pbmc.data))
+head(colnames(pbmc.data))
+```
+
+```{r}
+pbmc <- CreateSeuratObject(pbmc.data, min.cells = 3, project = "PBMC")
+```
+
+## Quality control
+NOTE: The distribution of percent.mito is suuuuper sample-specific. You'll have to change the cutoffs for your own sample
+```{r}
+pbmc[["percent.mito"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+VlnPlot(pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3)
+```
+
+```{r}
+# FeatureScatter is typically used to visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+plot1 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "percent.mito")
+plot2 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+CombinePlots(plots = list(plot1, plot2))
+```
+
+# Filtering
+Here, we'll tell Seurat which cells we want to keep
+
+We'll only keep cells with >200 detected genes (Why?) and <8% mitochondrial reads
+```{r}
+pbmc <- subset(pbmc, 
+               subset = nFeature_RNA > 200 & 
+                 percent.mito < 6)
+```
+
+# Normalization
+```{r}
+pbmc <- NormalizeData(pbmc) #uses log normalization and library size scaling
+```
+
+# Identifying most variable genes
+
+```{r}
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+```
+
+# Scale data and regress technical factors
+
+```{r}
+pbmc <- ScaleData(pbmc, vars.to.regress=c("nCount_RNA", "percent.mito"))
+```
+
+# Cell cycle scoring
+Cell cycle stage can sometime confound biological differences of interest
+
+It's worth running a cell cycle annotation so you can at least determine if any patterns are due to this
+
+```{r}
+pbmc <- CellCycleScoring(pbmc, s.features=cc.genes$s.genes, g2m.features = cc.genes$g2m.genes)
+```
+
+# Principal Component Analaysis (PCA)
+Much of the downstream analysis is actually performed on principal components rather than gene expression itself
+
+This is done as a way to boil down the signal from massive 20,000-dimension data (genes) to a smaller 
+number of measurements (PC values; eg. 30 dimensions)
+
+This is valid because of large amounts of redundancy in gene expression (eg. correlate genes).
+
+```{r}
+pbmc <- RunPCA(pbmc)
+```
+
+We can now visualize our data a bit better
+
+```{r}
+DimPlot(pbmc, reduction="pca")
+```
+
+There's definitely structure here, but what does it correspond to?
+
+# Save point
+We've gone through basic processing pipeline. Let's save our seurat object so that we don't have to do this every time
+
+```{r}
+saveRDS(pbmc, "../data/pbmc_processed.rds")
+```
+
+
+
+
