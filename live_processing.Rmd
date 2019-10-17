@@ -1,0 +1,143 @@
+---
+title: "scRNA-seq workshop 2019"
+output: html_notebook
+---
+
+# Goal
+To show people how we analyze scRNA-seq
+
+# Dependencies
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+```
+
+# Load the data
+```{r}
+pbmc.data <- Read10X(data.dir ="../data/filtered_gene_bc_matrices_8kpbmc/GRCh38/")
+```
+
+```{r}
+pbmc <- CreateSeuratObject(pbmc.data, min.cells = 3, project = "PBMC")
+```
+
+# Quality control
+
+```{r}
+pbmc[["percent.mito"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+
+VlnPlot(pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3)
+```
+
+# Filtering
+```{r}
+pbmc <- subset(pbmc, subset = nFeature_RNA > 200 & percent.mito < 6)
+```
+
+# Normalization
+```{r}
+pbmc <- NormalizeData(pbmc) #uses log normalization and library size scaling
+```
+
+# Identifying most variable genes
+
+```{r}
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst",
+                             nfeatures = 2000)
+```
+
+# Scale data and regress technical factors
+
+```{r}
+pbmc <- ScaleData(pbmc, vars.to.regress=c("nCount_RNA",
+                                          "percent.mito"))
+```
+
+# PCA
+
+```{r}
+pbmc <- RunPCA(pbmc)
+```
+
+
+DimPlot()
+FeaturePlot()
+
+```{r}
+DimPlot(pbmc)
+FeaturePlot(pbmc, features="LYZ")
+FeaturePlot(pbmc, features="percent.mito")
+```
+
+```{r}
+DimPlot(pbmc, dims = c(1,3))
+```
+
+# Run UMAP
+
+```{r}
+ElbowPlot(pbmc, ndims=50)
+```
+
+
+```{r}
+pbmc <- RunUMAP(pbmc, dims=1:30)
+```
+
+```{r}
+DimPlot(pbmc)
+```
+
+```{r}
+FeaturePlot(pbmc, features = c("LYZ", "CD3D"))
+```
+
+# Clustering
+```{r}
+pbmc <- FindNeighbors(pbmc, dims=1:30)
+pbmc <- FindClusters(pbmc, resolution = 0.3)
+```
+
+```{r}
+DimPlot(pbmc, label=T)
+```
+
+Clusters are stored
+```{r}
+head(pbmc@meta.data)
+
+```
+
+```{r}
+table(pbmc$seurat_clusters)
+```
+
+# Find Markers of Each Cluster
+Two functions in Seurat to know about
+FindMarkers() - One cluster only
+FindAllMarkers() - All clusters
+```{r}
+pbmc.markers <- FindAllMarkers(pbmc, logfc.threshold = 0.75)
+```
+
+
+
+Sample ggplot2 code
+```{r}
+data <- pbmc@meta.data
+data$UMAP1 <- Embeddings(pbmc, 'umap')[,1]
+data$UMAP2 <- Embeddings(pbmc, 'umap')[,2]
+
+data_plot <- ggplot(data, aes(x=UMAP1, y=UMAP2)) +
+  geom_point(size=0.2, alpha=0.5, aes(color=seurat_clusters)) +
+  theme_classic() +
+  theme(axis.text=element_text(size=12, color="black"))
+
+data_plot
+```
+
+
+
